@@ -1,18 +1,75 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 import os
+import cv2
 from datetime import datetime
 import shutil
-from typing import List
+from typing import List, Dict
 from src.services.media_service import MediaService
 import zipfile
 from pathlib import Path
 import tempfile
+import numpy as np
 
 router = APIRouter(prefix="/api/v1", tags=["media"])
 media_service = MediaService(model_path="weights/crime_activity_v1.pt")
 
 CONFIDENCE_THRESHOLD = 0.05
+
+
+@router.post("/images/detect")
+async def detect_image(image: UploadFile = File(...)):
+    """Detect activities in a single image and return confidence scores for all labels"""
+    if not image.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=400, detail="Invalid file type. Please upload an image file."
+        )
+
+    try:
+        # Read and process image
+        contents = await image.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        image_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if image_cv is None:
+            raise ValueError("Could not read image file")
+
+        # Resize image
+        resized_image = cv2.resize(image_cv, (64, 64))
+
+        # Get predictions
+        results = media_service.model(resized_image)
+
+        # Process all labels and their confidences
+        label_confidences: Dict[str, float] = {}
+        detected_labels: List[str] = []
+
+        for r in results:
+            probs = r.probs.data.cpu().numpy()
+            for cls in range(len(probs)):
+                conf = float(probs[cls])
+                label = media_service.LABELS[cls]
+                label_confidences[label] = conf
+
+                # Check if confidence exceeds threshold for detection
+                threshold = media_service.CRIME_THRESHOLDS.get(
+                    label, CONFIDENCE_THRESHOLD
+                )
+                if conf > threshold and label != "normal videos":
+                    detected_labels.append(label)
+
+        return JSONResponse(
+            {
+                "status": "success",
+                "data": {
+                    "detected_activities": detected_labels,
+                    "confidences": label_confidences,
+                    "filename": image.filename,
+                },
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/videos/process")

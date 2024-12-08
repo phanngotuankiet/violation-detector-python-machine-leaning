@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Crime Detection</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .video-container {
+            position: relative;
+            width: 100%;
+            background: #000;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .video-container video {
+            width: 100%;
+            max-height: 500px;
+            object-fit: contain;
+        }
+
+        .label-overlay {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 5px;
+            font-weight: bold;
+            display: none;
+            z-index: 1000;
+        }
+
+        .detection-log {
+            height: 400px;
+            overflow-y: auto;
+            padding: 10px;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .detection-item {
+            margin-bottom: 8px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            animation: fadeIn 0.3s ease-in;
+            border-left: 4px solid #ddd;
+        }
+
+        .detection-item.suspicious {
+            border-left-color: #dc3545;
+            background-color: rgba(220, 53, 69, 0.1);
+        }
+
+        .detection-item .time {
+            font-size: 0.8em;
+            color: #666;
+        }
+
+        .detection-item .time-code {
+            font-weight: bold;
+            color: #007bff;
+        }
+
+        .activity-item {
+            margin-top: 5px;
+            padding: 3px 8px;
+            border-radius: 3px;
+            background: rgba(0, 0, 0, 0.05);
+        }
+
+        .progress-container {
+            display: none;
+            margin: 15px 0;
+        }
+
+        .confidence-bar {
+            height: 4px;
+            background-color: #e9ecef;
+            border-radius: 2px;
+            margin-top: 5px;
+        }
+
+        .confidence-bar-fill {
+            height: 100%;
+            background-color: #007bff;
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .status-connected {
+            background-color: #28a745;
+        }
+
+        .status-disconnected {
+            background-color: #dc3545;
+        }
+
+        .status-processing {
+            background-color: #ffc107;
+        }
+
+        #errorAlert {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1050;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container mt-4">
+        <h1 class="text-center mb-4">Real-time Crime Detection</h1>
+
+        <!-- Error Alert -->
+        <div class="alert alert-danger d-none" id="errorAlert" role="alert"></div>
+
+        <div class="row">
+            <!-- Video Upload and Display Section -->
+            <div class="col-md-8">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">Upload Video</h5>
+                            <div>
+                                <span id="wsStatus" class="status-indicator status-disconnected"></span>
+                                <span id="connectionStatus">Disconnected</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <!-- Upload Area -->
+                        <div class="upload-area mb-3" id="dropZone">
+                            <form id="uploadForm">
+                                <div class="input-group">
+                                    <input type="file" class="form-control" id="videoInput" accept="video/*">
+                                    <button type="submit" class="btn btn-primary" id="uploadBtn" disabled>
+                                        Upload and Start Detection
+                                    </button>
+                                </div>
+                            </form>
+                            <div class="mt-2 text-muted">
+                                <small>Drag and drop your video here or click to select</small>
+                            </div>
+                        </div>
+
+                        <!-- Progress Bar -->
+                        <div class="progress progress-container">
+                            <div id="processProgress" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                        </div>
+
+                        <!-- Video Container -->
+                        <div class="video-container">
+                            <video id="videoPlayer" controls playsinline></video>
+                            <div id="labelOverlay" class="label-overlay"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detection Log Section -->
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Detection Log</h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="detectionLog" class="detection-log"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Constants
+        const CRIME_THRESHOLDS = {
+            "vandalism": 0.3,
+            "shooting": 0.4,
+            "explosion": 0.4,
+            "arrest": 0.1,
+            "assault": 0.05,
+            "fighting": 0.05,
+            "road accidents": 0.05,
+            "robbery": 0.1,
+        };
+
+        $(document).ready(function () {
+            let video = null;
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            let isProcessing = false;
+
+            // Khởi tạo video
+            function initVideo() {
+                video = document.getElementById('videoPlayer');
+
+                video.addEventListener('loadedmetadata', function () {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    console.log("Video loaded, dimensions:", canvas.width, "x", canvas.height);
+                });
+
+                video.addEventListener('play', function () {
+                    isProcessing = true;
+                    $('#wsStatus').removeClass('status-disconnected').addClass('status-processing');
+                    $('#connectionStatus').text('Processing');
+                    processVideo();
+                    console.log("Video started");
+                });
+
+                video.addEventListener('pause', function () {
+                    isProcessing = false;
+                    $('#wsStatus').removeClass('status-processing').addClass('status-connected');
+                    $('#connectionStatus').text('Connected');
+                    console.log("Video paused");
+                });
+
+                video.addEventListener('ended', function () {
+                    isProcessing = false;
+                    $('#wsStatus').removeClass('status-processing').addClass('status-connected');
+                    $('#connectionStatus').text('Connected');
+                    console.log("Video ended");
+                });
+            }
+
+            // Xử lý khi chọn file
+            $('#videoInput').on('change', function (e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const videoUrl = URL.createObjectURL(file);
+                    if (!video) {
+                        initVideo();
+                    }
+                    video.src = videoUrl;
+                    $('#uploadBtn').prop('disabled', false);
+                    $('#detectionLog').empty();
+                    console.log("New video selected");
+                }
+            });
+
+            // Xử lý khi submit form
+            $('#uploadForm').on('submit', function (e) {
+                e.preventDefault();
+                if (video && video.src) {
+                    video.play();
+                }
+            });
+
+            // Xử lý video frame
+            function processVideo() {
+                if (!isProcessing) return;
+
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                canvas.toBlob(function (blob) {
+                    sendFrameToServer(blob);
+                }, 'image/jpeg');
+
+                requestAnimationFrame(processVideo);
+            }
+
+            // Gửi frame lên server
+            function sendFrameToServer(blob) {
+                const formData = new FormData();
+                formData.append('image', blob);
+
+                $.ajax({
+                    url: 'http://localhost:8000/api/v1/images/detect',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function (response) {
+                        if (response.status === 'success') {
+                            console.log("Detection result:", response.data);
+                            processDetectionResult(response.data);
+                        }
+                    },
+                    error: function (xhr, status, error) {
+                        console.error('Error:', error);
+                        showError('Error processing frame: ' + error);
+                    }
+                });
+            }
+
+            // Xử lý kết quả detection
+            function processDetectionResult(data) {
+                const confidences = data.confidences;
+                let detectedActivities = [];
+
+                for (const [activity, confidence] of Object.entries(confidences)) {
+                    if (activity !== 'normal videos' &&
+                        CRIME_THRESHOLDS[activity] &&
+                        confidence > CRIME_THRESHOLDS[activity]) {
+                        detectedActivities.push({
+                            activity: activity,
+                            confidence: confidence
+                        });
+                    }
+                }
+
+                if (detectedActivities.length === 0) {
+                    detectedActivities.push({
+                        activity: 'normal',
+                        confidence: confidences['normal videos']
+                    });
+                }
+
+                updateOverlay(detectedActivities[0]);
+                addToDetectionLog(detectedActivities);
+            }
+
+            // Cập nhật overlay trên video
+            function updateOverlay(activity) {
+                const overlay = $('#labelOverlay');
+
+                overlay.html(`
+                    <div>${activity.activity.toUpperCase()}</div>
+                    <div>${(activity.confidence * 100).toFixed(1)}%</div>
+                `);
+
+                overlay.css('background-color',
+                    activity.activity === 'normal'
+                        ? 'rgba(40, 167, 69, 0.8)' // green
+                        : 'rgba(220, 53, 69, 0.8)' // red
+                );
+
+                overlay.show();
+            }
+
+            // Thêm vào detection log
+            function addToDetectionLog(activities) {
+                const timestamp = new Date().toLocaleTimeString();
+                let html = `
+                    <div class="detection-item ${activities[0].activity !== 'normal' ? 'suspicious' : ''}">
+                        <div class="d-flex justify-content-between">
+                            <span class="time">${timestamp}</span>
+                            <span class="time-code">${formatTime(video.currentTime)}</span>
+                        </div>
+                `;
+
+                activities.forEach(act => {
+                    html += `
+                        <div class="activity-item">
+                            <strong>${act.activity.toUpperCase()}</strong>
+                            <div class="confidence-bar">
+                                <div class="confidence-bar-fill" 
+                                     style="width: ${act.confidence * 100}%"></div>
+                            </div>
+                            <small>${(act.confidence * 100).toFixed(1)}%</small>
+                        </div>
+                    `;
+                });
+
+                html += '</div>';
+
+                const logContainer = $('#detectionLog');
+                logContainer.append(html);
+                logContainer.scrollTop(logContainer[0].scrollHeight);
+            }
+
+            // Hiển thị lỗi
+            function showError(message) {
+                const errorAlert = $('#errorAlert');
+                errorAlert.text(message).removeClass('d-none');
+                setTimeout(() => errorAlert.addClass('d-none'), 5000);
+            }
+
+            // Format thời gian
+            function formatTime(seconds) {
+                const minutes = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${minutes}:${secs.toString().padStart(2, '0')}`;
+            }
+
+            // Cleanup khi đóng trang
+            $(window).on('beforeunload', function () {
+                if (video && video.src) {
+                    URL.revokeObjectURL(video.src);
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>
