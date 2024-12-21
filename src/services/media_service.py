@@ -34,13 +34,13 @@ class ProcessedResult:
 class MediaService:
     CRIME_THRESHOLDS = {
         "vandalism": 0.3,
-        "shooting": 0.4,
-        "explosion": 0.4,
+        "shooting": 0.5,
+        "explosion": 0.5,
         "arrest": 0.1,
         "assault": 0.05,
         "fighting": 0.05,
         "normal videos": 0.1,
-        "road accidents": 0.05,
+        "road accidents": 0.1,
         "robbery": 0.1,
     }
 
@@ -71,7 +71,7 @@ class MediaService:
         return model
 
     async def process_video(
-        self, video_path: str, conf_threshold: float = 0.1
+        self, video_path: str, conf_threshold: float = 0.2
     ) -> VideoResult:
         """Process video and detect criminal activities"""
         video_name = os.path.splitext(os.path.basename(video_path))[0]
@@ -121,7 +121,7 @@ class MediaService:
                 break
 
             frames.append(frame)
-            resized_frame = cv2.resize(frame, (64, 64))
+            resized_frame = cv2.resize(frame, (256, 256))
             results = self.model(resized_frame)
 
             self._process_frame_predictions(
@@ -271,7 +271,7 @@ class MediaService:
         output_dir = os.path.join(self.output_dir, image_name)
         os.makedirs(output_dir, exist_ok=True)
 
-        resized_image = cv2.resize(image, (64, 64))
+        resized_image = cv2.resize(image, (256, 256))
         results = self.model(resized_image)
 
         detected_crimes = []

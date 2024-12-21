@@ -34,7 +34,7 @@ async def detect_image(image: UploadFile = File(...)):
             raise ValueError("Could not read image file")
 
         # Resize image
-        resized_image = cv2.resize(image_cv, (64, 64))
+        resized_image = cv2.resize(image_cv, (256, 256))
 
         # Get predictions
         results = media_service.model(resized_image)
